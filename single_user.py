@@ -3,12 +3,14 @@
 import local_config as conf
 import boto3
 import datetime
-import time
-import json
-import os
+# import time
+# import json
+# import os
+import colorama
 
 # START: Preparation > Globals ............................................... #
 default_region = conf.ssm['default_region']
+colorama.init()
 # securetoken_start = None
 
 # END: Preparation > Globals ................................................. #
@@ -362,10 +364,10 @@ def printResults(case,payload=None):
 		print('')
 		if payload['list']:
 			for parameter in payload['Parameters']:
-				line = str(parameter['Name']).replace('/secrets/', '')+' : '+parameter['Value']
+				line = str(parameter['Name']).replace('/secrets/', '')+' : \033[33;1m'+parameter['Value']+'\033[0m'
 				print(line)
 		else:
-			line = str(payload['Parameter']['Name']).replace('/secrets/', '')+' : '+payload['Parameter']['Value']
+			line = str(payload['Parameter']['Name']).replace('/secrets/', '')+' : \033[33;1m'+payload['Parameter']['Value']+'\033[0m'
 			print(line)
 			line = '\nVersion: {0}'.format(payload['Parameter']['Version'])
 			print(line)
@@ -438,7 +440,7 @@ def getInput(case):
 	print('')
 	if case == 'code':
 		try:
-			s_input = input('> secret code? : ')
+			s_input = input('secret code? : ')
 		except Exception as e:
 			return 500
 		else:
@@ -453,7 +455,7 @@ def getInput(case):
 			print('(L) List secrets hierarchy')
 			print('(E) Exit')
 			print('')
-			action_wanted = input('> what do you want to do? (enter letter) : ')
+			action_wanted = input('what do you want to do? (enter letter) : ')
 		except Exception as e:
 			return 500
 		else:
@@ -462,7 +464,7 @@ def getInput(case):
 	if case == 'find':
 		# Ask for input
 		try:
-			s_input = input('> what secret(s) are you looking for? : ')
+			s_input = input('what secret(s) are you looking for? : ')
 		except Exception as e:
 			return 500
 		else:
@@ -475,13 +477,13 @@ def getInput(case):
 			print('Instructions:')
 			print('Use slashes to separate the path to your new secret. e.g., \'amazon/username\' or \'amazon/password\' ')
 			print('')
-			new_path = input('> 1. What is your new secret\'s path? : ')
+			new_path = input('1. What is your new secret\'s path? : ')
 		except Exception as e:
 			return 500
 
 		try:
 			print('')
-			new_value = input('> 2. What is the value of your new secret? : ')
+			new_value = input('2. What is the value of your new secret? : ')
 		except Exception as e:
 			return 500
 
@@ -493,15 +495,16 @@ def getInput(case):
 
 	if case == 'retry':
 		try:
-			s_input = input('> press (C) to Continue or (E) to Exit : ')
+			s_input = input('press (C) to Continue or (E) to Exit : ')
 		except Exception as e:
 			return 500
 		else:
+			print(colorama.ansi.clear_screen())
 			return s_input.lower()
 
 	if case == 'yes_no':
 		try:
-			s_input = input('> (y) yes, or (n) no : ')
+			s_input = input('(y) yes, or (n) no : ')
 		except Exception as e:
 			return 500
 		else:
