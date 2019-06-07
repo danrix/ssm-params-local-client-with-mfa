@@ -9,7 +9,7 @@ import os
 
 # START: Preparation > Globals ............................................... #
 default_region = conf.ssm['default_region']
-securetoken_start = None
+# securetoken_start = None
 
 # END: Preparation > Globals ................................................. #
 
@@ -19,6 +19,12 @@ def mainLoop(credentials):
 	action_requested = None	
 
 	while True:
+		# Check that the session is still valid .............................. >
+		session_valid = checkSession(credentials['Expiration'])
+
+		if session_valid == 500:
+			printResults('')
+			exit()
 
 		# Verify user has requested an action ................................ >
 		if not action_requested:
@@ -27,7 +33,7 @@ def mainLoop(credentials):
 
 			if action_requested == 500:
 				action_requested = None
-				postOutput('generic_error')
+				printResults('generic_error')
 				continue
 
 		# Act on action request .............................................. >
@@ -38,30 +44,43 @@ def mainLoop(credentials):
 			s_input = getInput('find')
 
 			if s_input == 500:
-				postOutput('generic_error')
+				printResults('generic_error')
 				s_input = None
 				continue
 			else:
 				# Normalize query path
 				path_norm = normalizePath(s_input)
+
+				if path_norm == 501:
+					printResults('invalid_empty')
+
+					# Check if the user wants to continue or exit
+					action_requested = None if 'c' in getInput('retry') else exit()
+
+				if path_norm == 502:
+					printResults('invalid_slash')
+					
+					# Check if the user wants to continue or exit
+					action_requested = None if 'c' in getInput('retry') else exit()
+
 				# Query for the secret given the path
 				find_ret = findSecret(credentials,path_norm)
-			
+
 				if find_ret == 500:
-					postOutput('generic_error')
+					printResults('generic_error')
 					continue
+				elif find_ret == 404:
+					printResults('cant_find')
+					
+					# Check if the user wants to continue or exit
+					action_requested = None if 'c' in getInput('retry') else exit()
+
 				else:
 					# Print Results
 					printResults('find',find_ret)
-					# Check if the user wants to continue working
-					s_input = getInput('retry')
-
-					if 'c' in s_input:
-						action_requested = None
-						s_input = None
-						continue
-					else:
-						exit()
+					
+					# Check if the user wants to continue or exit
+					action_requested = None if 'c' in getInput('retry') else exit()
 
 		## Add Secret ##
 		elif 'a' in action_requested:
@@ -69,16 +88,29 @@ def mainLoop(credentials):
 			s_input = getInput('add')
 
 			if s_input == 500:
-				postOutput('generic_error')
+				printResults('generic_error')
 				s_input = None
 				continue
 			else:
 				# Normalize new path
-				s_input['path'] = normalizePath(s_input['path'])
+				n_path = normalizePath(s_input['path'])
+
+				if n_path == 501:
+					printResults('invalid_empty')
+					
+					# Check if the user wants to continue or exit
+					action_requested = None if 'c' in getInput('retry') else exit()
+
+				elif n_path == 502:
+					printResults('invalid_slash')
+					
+					# Check if the user wants to continue or exit
+					action_requested = None if 'c' in getInput('retry') else exit()
+
 				# Check for existing secret
-				find_existing = findSecret(credentials,s_input['path'])
+				find_existing = findSecret(credentials,n_path)
 				if find_existing == 500:
-					postOutput('generic_error')
+					printResults('generic_error')
 					continue
 				elif find_existing == 404:
 					add_yes = True
@@ -96,20 +128,14 @@ def mainLoop(credentials):
 					add_ret = addSecret(credentials,s_input)
 
 					if add_ret == 500:
-						postOutput('generic_error')
+						printResults('generic_error')
 						continue
 					else:
 						# Print Results
 						printResults('add_success')
-						# Check if the user wants to continue working
-						s_input = getInput('retry')
-
-						if 'c' in s_input:
-							action_requested = None
-							s_input = None
-							continue
-						else:
-							exit()
+						
+						# Check if the user wants to continue or exit
+						action_requested = None if 'c' in getInput('retry') else exit()
 
 		## List Hierarchy ##
 		elif 'l' in action_requested:
@@ -117,24 +143,30 @@ def mainLoop(credentials):
 			# 	pass
 
 			# Normalize query path
-			path_norm = normalizePath("/")
+			# path_norm = normalizePath("/"+conf.local['ssm_aws_profile'])
+			path_norm = normalizePath("/gb")
+
 			list_ret = getHierarchy(credentials,path_norm)
 
 			if list_ret == 500:
-				print('\r\nThat didn\'t work. Try again\r\n')
+				printResults('generic_error')
 				continue
 			else:
 				# Print Results
 				printResults('list',list_ret)
-				# Check if the user wants to continue working
-				s_input = getInput('retry')
+				
+				# Check if the user wants to continue or exit
+				action_requested = None if 'c' in getInput('retry') else exit()
 
-				if 'c' in s_input:
-					action_requested = None
-					s_input = None
-					continue
-				else:
-					exit()
+		elif 'e' in action_requested:
+			exit()
+		else:
+			# Print Results
+			printResults('wrong_choice')
+			
+			# Check if the user wants to continue or exit
+			action_requested = None if 'c' in getInput('retry') else exit()
+
 
 def getSecureCredentials():
 	# Preparation ............................................................ /
@@ -185,6 +217,13 @@ def getSecureCredentials():
 def normalizePath(s_in):
 	# Lower case
 	s_in = s_in.lower()
+
+	# Check that path is not empty, or single slash
+	if len(s_in) == 0:
+		return 501 # path is empty
+	elif len(s_in) == 1:
+		if s_in[:1] == '/':
+			return 502 # path is slash
 
 	# If user HAS included basepath in query
 	if conf.ssm['params_basepath'] in s_in:
@@ -300,6 +339,15 @@ def getHierarchy(credentials,s_path):
 	else:
 		return response
 
+def checkSession(credentials_expiration):
+	# Check that the secure session has not expired
+	while True:
+		# If it has, exit program
+		if datetime.datetime.now(datetime.timezone.utc) > credentials_expiration:
+			return 500
+		else:
+			return 200
+
 	
 def printResults(case,payload=None):
 	print('')
@@ -307,7 +355,7 @@ def printResults(case,payload=None):
 		print('Something went wrong. Please try again')
 	
 	elif case == 'auth_error':
-		print('I can\'t authenticate you. Please try again')
+		print('Authentication failed. Please try again')
 	
 	elif case == 'find':
 		print('------ Results ---------')
@@ -368,6 +416,17 @@ def printResults(case,payload=None):
 		print('')
 		print('------------------------')
 
+	elif case == 'wrong_choice':
+		print('That is not a valid option.')
+
+	elif case == 'cant_find':
+		print('No results for that search.')
+
+	elif case == 'invalid_empty':
+		print('You cannot use an empty path. Use slashes to separate the path to your secret. e.g., \'amazon/username\' or \'amazon/password\' ')
+
+	elif case == 'invalid_slash':
+		print('You cannot use a slash as your path, but you can use slashes to separate the path to your secret. e.g., \'amazon/username\' or \'amazon/password\' ')
 
 	else:
 		print(case)
@@ -379,7 +438,7 @@ def getInput(case):
 	print('')
 	if case == 'code':
 		try:
-			s_input = input('secret code? : ')
+			s_input = input('> secret code? : ')
 		except Exception as e:
 			return 500
 		else:
@@ -394,7 +453,7 @@ def getInput(case):
 			print('(L) List secrets hierarchy')
 			print('(E) Exit')
 			print('')
-			action_wanted = input('what do you want to do? (enter letter) : ')
+			action_wanted = input('> what do you want to do? (enter letter) : ')
 		except Exception as e:
 			return 500
 		else:
@@ -403,7 +462,7 @@ def getInput(case):
 	if case == 'find':
 		# Ask for input
 		try:
-			s_input = input('what secret(s) are you looking for? : ')
+			s_input = input('> what secret(s) are you looking for? : ')
 		except Exception as e:
 			return 500
 		else:
@@ -416,13 +475,13 @@ def getInput(case):
 			print('Instructions:')
 			print('Use slashes to separate the path to your new secret. e.g., \'amazon/username\' or \'amazon/password\' ')
 			print('')
-			new_path = input('1. What is your new secret\'s path? : ')
+			new_path = input('> 1. What is your new secret\'s path? : ')
 		except Exception as e:
 			return 500
 
 		try:
 			print('')
-			new_value = input('2. What is the value of your new secret? : ')
+			new_value = input('> 2. What is the value of your new secret? : ')
 		except Exception as e:
 			return 500
 
@@ -434,7 +493,7 @@ def getInput(case):
 
 	if case == 'retry':
 		try:
-			s_input = input('press (C) to Continue or (E) to Exit : ')
+			s_input = input('> press (C) to Continue or (E) to Exit : ')
 		except Exception as e:
 			return 500
 		else:
@@ -442,7 +501,7 @@ def getInput(case):
 
 	if case == 'yes_no':
 		try:
-			s_input = input('(y) yes, or (n) no : ')
+			s_input = input('> (y) yes, or (n) no : ')
 		except Exception as e:
 			return 500
 		else:
@@ -459,23 +518,9 @@ if __name__== "__main__":
 	except Exception as e:
 		exit()
 	else:
-		if sec_credentials == 500:
+		if (sec_credentials == 500) or (sec_credentials == 501):
 			printResults('auth_error')
+			print('')
 			exit()
 
 	mainLoop(sec_credentials)
-
-
-
-
-	# securetoken_start = str(sec_credentials['Expiration'])
-	# print(securetoken_start)
-	# print(json.dumps(sec_credentials,indent=4, sort_keys=True, default=str))
-
-	# while True:
-	# 	if datetime.datetime.now(datetime.timezone.utc) > sec_credentials['Expiration']:
-	# 		print('expired')
-	# 		exit()
-	# 	else:
-	# 		print('not expired: ',datetime.datetime.now(datetime.timezone.utc))
-	# 		time.sleep(30)
