@@ -437,14 +437,18 @@ def printResults(case,payload=None):
 	return 200
 
 def getInput(case):
+	# Preparation ............................................................ /
+	question_mark = '\033[32;1m ? \033[0m '
+	start_input_blue = '\033[36;1m'
 	print('')
 	if case == 'code':
 		try:
-			s_input = input('secret code? : ')
+			print(question_mark+'secret code? : '+start_input_blue, end="")
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return s_input
+			return_object = s_input
 
 	if case == 'main_menu':
 		try:
@@ -455,60 +459,69 @@ def getInput(case):
 			print('(L) List secrets hierarchy')
 			print('(E) Exit')
 			print('')
-			action_wanted = input('what do you want to do? (enter letter) : ')
+			print(question_mark+'what do you want to do? (enter letter) : '+start_input_blue, end="")
+			action_wanted = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return action_wanted.lower()
+			return_object = action_wanted.lower()
 
 	if case == 'find':
 		# Ask for input
 		try:
-			s_input = input('what secret(s) are you looking for? : ')
+			print(question_mark+'what secret(s) are you looking for? : '+start_input_blue, end='')
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return s_input
+			return_object = s_input
 
 	if case == 'add':
 		try:
 			print('------ Add a New Secret ')
 			print('')
-			print('Instructions:')
-			print('Use slashes to separate the path to your new secret. e.g., \'amazon/username\' or \'amazon/password\' ')
+			print('\033[35mInstructions:')
+			print('Use slashes to separate the path to your new secret. e.g., \'amazon/username\' or \'amazon/password\' \033[0m')
 			print('')
-			new_path = input('1. What is your new secret\'s path? : ')
+			print(question_mark+'1. What is your new secret\'s path? : '+start_input_blue,end='')
+			new_path = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 
 		try:
 			print('')
-			new_value = input('2. What is the value of your new secret? : ')
+			print(question_mark+'2. What is the value of your new secret? : '+start_input_blue,end='')
+			new_value = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 
 		return_object = {}
 		return_object['path'] = new_path
 		return_object['value'] = new_value
 
-		return return_object
+		# return return_object
 
 	if case == 'retry':
 		try:
-			s_input = input('press (C) to Continue or (E) to Exit : ')
+			print(question_mark+'press (C) to Continue or (E) to Exit : '+start_input_blue,end='')
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
 			print(colorama.ansi.clear_screen())
-			return s_input.lower()
+			return_object = s_input.lower()
 
 	if case == 'yes_no':
 		try:
-			s_input = input('(y) yes, or (n) no : ')
+			print(question_mark+'Yes, or no (Y/n) : '+start_input_blue,end='')
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return s_input.lower()
+			return_object = s_input.lower()
+
+	print('\033[0m')
+	return return_object
 
 # END: Functions ............................................................. #
 

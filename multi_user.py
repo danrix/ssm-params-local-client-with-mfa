@@ -5,7 +5,7 @@ import boto3
 import datetime
 # import time
 # import json
-# import os
+import os
 import colorama
 
 # START: Preparation > Globals ............................................... #
@@ -146,7 +146,7 @@ def mainLoop(credentials):
 
 			# Normalize query path
 			# path_norm = normalizePath("/"+conf.local['ssm_aws_profile'])
-			path_norm = normalizePath("/gb")
+			path_norm = normalizePath(credentials['list_path'])
 
 			list_ret = getHierarchy(credentials,path_norm)
 
@@ -174,34 +174,56 @@ def getSecureCredentials():
 	# Preparation ............................................................ /
 	# user_profile = conf.local['ssm_aws_profile']
 	user_profile = 'ssmpars_router'
-	print('debug: ',user_profile) # debug											<<<
 
 	# 1. Start initial session using stored profile
 	try:
 		session = boto3.session.Session(profile_name=user_profile)
-		print('debug: ',session) # debug											<<<
 	except Exception as e:
 		return 500
 	else:
 		# Prepare credentials for ssm client
 		initial_creds = session.get_credentials()
-		print('debug: ',initial_creds) # debug											<<<
 		ssm_init_creds = {}
 		ssm_init_creds['AccessKeyId'] = initial_creds.access_key
 		ssm_init_creds['SecretAccessKey'] = initial_creds.secret_key
 
 	# 2. Get user initials
 	s_input = getInput('initials')
-	print('debug: ',s_input) # debug											<<<
 
 	# 3. Query ssm for user's params
-	find_ret = findSecret(ssm_init_creds,'/router/users/'+s_input)
+	try:
+		find_ret = findSecret(ssm_init_creds,'/router/users/'+s_input)
+	except Exception as e:
+		return 500
+	else:
+		if (find_ret == 404) or (find_ret == 500):
+			return 500
 
-	print('debug find_ret: ',find_ret) # debug											<<<
-	exit()
+	# 4. Extract user details from query return
+	user = {}
+	user['initials'] = s_input
+	for param in find_ret['Parameters']:
+		if 'aws_access_key_id' in param['Name']:
+			user['AccessKeyId'] = param['Value']
+			continue
+		elif 'aws_secret_access_key' in param['Name']:
+			user['SecretAccessKey'] = param['Value']
+			continue
+		elif 'list_path' in param['Name']:
+			user['list_path'] = param['Value']
+			continue
 
-
-
+	# 5. Start user session
+	try:
+		session = boto3.session.Session(
+			aws_access_key_id=user['AccessKeyId'], 
+			aws_secret_access_key=user['SecretAccessKey'], 
+			aws_session_token=None,  
+			profile_name=None
+			)
+	except Exception as e:
+		return 500
+		
 	## === ##
 
 	# Initialize STS client
@@ -216,7 +238,7 @@ def getSecureCredentials():
 	# Get MFA serial number
 	try:
 		mfa_par0 = conf.ssm['account_number']
-		mfa_par1 = conf.local['mfa_suffix']
+		mfa_par1 = 'cliSSMParams_{0}'.format(user['initials']) # conf.local['mfa_suffix']
 		mfa_serial = 'arn:aws:iam::{0}:mfa/{1}'.format(mfa_par0,mfa_par1)
 	except Exception as e:
 		return 500
@@ -238,7 +260,10 @@ def getSecureCredentials():
 		return 501
 
 	# Return secure credentials .............................................. >
-	return response['Credentials']
+	return_object = {}
+	return_object.update(response['Credentials'])
+	return_object['list_path'] = user['list_path']
+	return return_object
 
 def normalizePath(s_in):
 	# Lower case
@@ -281,21 +306,16 @@ def getSsmClient(credentials):
 		    aws_secret_access_key=credentials['SecretAccessKey'],
 		    aws_session_token=credentials['SessionToken'] if 'SessionToken' in credentials else None
 		)
-		print('debug client: ',client) # debug											<<<
 
 	except Exception as e:
-		print('e: ',e) # debug											<<<
 		return 500
 	else:
 		return client
 
 def findSecret(credentials,s_in):
-	print('debug creds: ',credentials) # debug											<<<
-	print('debug s_in: ',s_in) # debug											<<<
 	# Prepare client to SSM service .......................................... /
 	try:
 		client = getSsmClient(credentials)
-		print('debug client: ',client) # debug											<<<
 	except Exception as e:
 		return 500
 
@@ -467,22 +487,27 @@ def printResults(case,payload=None):
 	return 200
 
 def getInput(case):
+	# Preparation ............................................................ /
+	question_mark = '\033[32;1m ? \033[0m '
+	start_input_blue = '\033[36;1m'
 	print('')
-	if case == 'code':
-		try:
-			s_input = input('secret code? : ')
-		except Exception as e:
-			return 500
-		else:
-			return s_input
-
 	if case == 'initials':
 		try:
-			s_input = input('what are your initials? : ')
+			print(question_mark+'what are your initials? : '+start_input_blue, end="")
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return s_input
+			return_object = s_input
+
+	if case == 'code':
+		try:
+			print(question_mark+'secret code? : '+start_input_blue, end="")
+			s_input = input()
+		except Exception as e:
+			return_object = 500
+		else:
+			return_object = s_input
 
 	if case == 'main_menu':
 		try:
@@ -493,60 +518,70 @@ def getInput(case):
 			print('(L) List secrets hierarchy')
 			print('(E) Exit')
 			print('')
-			action_wanted = input('what do you want to do? (enter letter) : ')
+			print(question_mark+'what do you want to do? (enter letter) : '+start_input_blue, end="")
+			action_wanted = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return action_wanted.lower()
+			return_object = action_wanted.lower()
 
 	if case == 'find':
 		# Ask for input
 		try:
-			s_input = input('what secret(s) are you looking for? : ')
+			print(question_mark+'what secret(s) are you looking for? : '+start_input_blue, end='')
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return s_input
+			return_object = s_input
 
 	if case == 'add':
 		try:
 			print('------ Add a New Secret ')
 			print('')
-			print('Instructions:')
-			print('Use slashes to separate the path to your new secret. e.g., \'amazon/username\' or \'amazon/password\' ')
+			print('\033[35mInstructions:')
+			print('Use slashes to separate the path to your new secret. e.g., \'amazon/username\' or \'amazon/password\' \033[0m')
 			print('')
-			new_path = input('1. What is your new secret\'s path? : ')
+			print(question_mark+'1. What is your new secret\'s path? : '+start_input_blue,end='')
+			new_path = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 
 		try:
 			print('')
-			new_value = input('2. What is the value of your new secret? : ')
+			print(question_mark+'2. What is the value of your new secret? : '+start_input_blue,end='')
+			new_value = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 
 		return_object = {}
 		return_object['path'] = new_path
 		return_object['value'] = new_value
 
-		return return_object
+		# return return_object
 
 	if case == 'retry':
 		try:
-			s_input = input('press (C) to Continue or (E) to Exit : ')
+			print(question_mark+'press (C) to Continue or (E) to Exit : '+start_input_blue,end='')
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
 			print(colorama.ansi.clear_screen())
-			return s_input.lower()
+			_= os.system('clear')
+			return_object = s_input.lower()
 
 	if case == 'yes_no':
 		try:
-			s_input = input('(y) yes, or (n) no : ')
+			print(question_mark+'Yes, or no (Y/n) : '+start_input_blue,end='')
+			s_input = input()
 		except Exception as e:
-			return 500
+			return_object = 500
 		else:
-			return s_input.lower()
+			return_object = s_input.lower()
+
+	print('\033[0m')
+	return return_object
 
 # END: Functions ............................................................. #
 
