@@ -1,4 +1,5 @@
 local_config.py
+local_config_single.py
 objects_reference.txt
 __pycache__
 *.lnk

@@ -3,15 +3,12 @@
 import local_config as conf
 import boto3
 import datetime
-# import time
-# import json
 import os
 import colorama
 
 # START: Preparation > Globals ............................................... #
 default_region = conf.ssm['default_region']
 colorama.init()
-# securetoken_start = None
 
 # END: Preparation > Globals ................................................. #
 
@@ -51,7 +48,7 @@ def mainLoop(credentials):
 				continue
 			else:
 				# Normalize query path
-				path_norm = normalizePath(s_input)
+				path_norm = normalizePath(s_input,credentials['list_path'])
 
 				if path_norm == 501:
 					printResults('invalid_empty')
@@ -95,7 +92,7 @@ def mainLoop(credentials):
 				continue
 			else:
 				# Normalize new path
-				n_path = normalizePath(s_input['path'])
+				n_path = normalizePath(s_input['path'],credentials['list_path'])
 
 				if n_path == 501:
 					printResults('invalid_empty')
@@ -111,6 +108,7 @@ def mainLoop(credentials):
 
 				# Check for existing secret
 				find_existing = findSecret(credentials,n_path)
+
 				if find_existing == 500:
 					printResults('generic_error')
 					continue
@@ -127,6 +125,7 @@ def mainLoop(credentials):
 
 				if add_yes:
 					# Try to add new secret
+					s_input['path'] = n_path
 					add_ret = addSecret(credentials,s_input)
 
 					if add_ret == 500:
@@ -146,7 +145,7 @@ def mainLoop(credentials):
 
 			# Normalize query path
 			# path_norm = normalizePath("/"+conf.local['ssm_aws_profile'])
-			path_norm = normalizePath(credentials['list_path'])
+			path_norm = normalizePath(credentials['list_path'],credentials['list_path'])
 
 			list_ret = getHierarchy(credentials,path_norm)
 
@@ -161,6 +160,8 @@ def mainLoop(credentials):
 				action_requested = None if 'c' in getInput('retry') else exit()
 
 		elif 'e' in action_requested:
+			print(colorama.ansi.clear_screen(),end='')
+			os.system('clear')
 			exit()
 		else:
 			# Print Results
@@ -172,8 +173,7 @@ def mainLoop(credentials):
 
 def getSecureCredentials():
 	# Preparation ............................................................ /
-	# user_profile = conf.local['ssm_aws_profile']
-	user_profile = 'ssmpars_router'
+	user_profile = conf.local['ssm_aws_profile']
 
 	# 1. Start initial session using stored profile
 	try:
@@ -192,7 +192,7 @@ def getSecureCredentials():
 
 	# 3. Query ssm for user's params
 	try:
-		find_ret = findSecret(ssm_init_creds,'/router/users/'+s_input)
+		find_ret = findSecret(ssm_init_creds,str(conf.ssm['router_base_path']+s_input))
 	except Exception as e:
 		return 500
 	else:
@@ -238,7 +238,7 @@ def getSecureCredentials():
 	# Get MFA serial number
 	try:
 		mfa_par0 = conf.ssm['account_number']
-		mfa_par1 = 'cliSSMParams_{0}'.format(user['initials']) # conf.local['mfa_suffix']
+		mfa_par1 = conf.local['mfa_suffix']+user['initials']
 		mfa_serial = 'arn:aws:iam::{0}:mfa/{1}'.format(mfa_par0,mfa_par1)
 	except Exception as e:
 		return 500
@@ -265,33 +265,28 @@ def getSecureCredentials():
 	return_object['list_path'] = user['list_path']
 	return return_object
 
-def normalizePath(s_in):
+def normalizePath(s_in,base_path):
 	# Lower case
 	s_in = s_in.lower()
 
-	# Check that path is not empty, or single slash
-	if len(s_in) == 0:
-		return 501 # path is empty
-	elif len(s_in) == 1:
-		if s_in[:1] == '/':
-			return 502 # path is slash
+	# Split query string into path
+	q_path = s_in.strip('/').split('/')
 
-	# If user HAS included basepath in query
-	if conf.ssm['params_basepath'] in s_in:
-		# Check if it has a root slash
-		if s_in[:1] != '/':
-			s_in = '/'+s_in
+	# Split base path
+	b_path = base_path.strip('/').split('/')
 
-		# Prepare return string
-		s_out = s_in
+	# Remove parts of base path if they exist in query path
+	for b_node in b_path:
+		if b_node in q_path:
+			q_path.remove(b_node)
 
-	# If user has NOT included basepath in query
-	else:
-		if s_in[:1] == '/':
-			s_in = s_in[1:]
+	# Join the base and the query paths
+	b_path.extend(q_path)
+	f_path = "/".join(b_path)
 
-		# Prepare return string
-		s_out = '/{0}/{1}'.format(conf.ssm['params_basepath'],s_in)
+	f_path = '/'+f_path
+
+	return f_path
 
 	# Return normalized query string ......................................... >
 	return s_out
@@ -300,11 +295,11 @@ def getSsmClient(credentials):
 	# Prepare client to SSM service .......................................... /
 	try:
 		client = boto3.client(
-		    'ssm',
-		    region_name=default_region,
-		    aws_access_key_id=credentials['AccessKeyId'],
-		    aws_secret_access_key=credentials['SecretAccessKey'],
-		    aws_session_token=credentials['SessionToken'] if 'SessionToken' in credentials else None
+			'ssm',
+			region_name=default_region,
+			aws_access_key_id=credentials['AccessKeyId'],
+			aws_secret_access_key=credentials['SecretAccessKey'],
+			aws_session_token=credentials['SessionToken'] if 'SessionToken' in credentials else None
 		)
 
 	except Exception as e:
@@ -331,6 +326,11 @@ def findSecret(credentials,s_in):
 		return 500
 	else:
 		if response['Parameters']:
+
+			if 'list_path' in credentials:
+				for x in range(len(response['Parameters'])):
+					response['Parameters'][x]['Name'] =  response['Parameters'][x]['Name'].replace(credentials['list_path'],'')
+
 			return_object = {}
 			return_object['list'] = True
 			return_object['Parameters'] = response['Parameters']
@@ -340,12 +340,16 @@ def findSecret(credentials,s_in):
 	try:
 		response = client.get_parameter(
 			Name=s_in,
-		    WithDecryption=True
+			WithDecryption=True
 		)
 	except Exception as e:
 		return 404
 	else:
 		if response['Parameter']:
+			if 'list_path' in credentials:
+				# Strip the path from the result
+				response['Parameter']['Name'] = response['Parameter']['Name'].replace(credentials['list_path'],'')
+
 			return_object = {}
 			return_object['list'] = False
 			return_object['Parameter'] = response['Parameter']
@@ -493,7 +497,7 @@ def getInput(case):
 	print('')
 	if case == 'initials':
 		try:
-			print(question_mark+'what are your initials? : '+start_input_blue, end="")
+			print(question_mark+'what are your initials? : '+start_input_blue, end='')
 			s_input = input()
 		except Exception as e:
 			return_object = 500
@@ -502,7 +506,7 @@ def getInput(case):
 
 	if case == 'code':
 		try:
-			print(question_mark+'secret code? : '+start_input_blue, end="")
+			print(question_mark+'secret code? : '+start_input_blue, end='')
 			s_input = input()
 		except Exception as e:
 			return_object = 500
@@ -518,7 +522,7 @@ def getInput(case):
 			print('(L) List secrets hierarchy')
 			print('(E) Exit')
 			print('')
-			print(question_mark+'what do you want to do? (enter letter) : '+start_input_blue, end="")
+			print(question_mark+'what do you want to do? (enter letter) : '+start_input_blue, end='')
 			action_wanted = input()
 		except Exception as e:
 			return_object = 500
@@ -567,8 +571,8 @@ def getInput(case):
 		except Exception as e:
 			return_object = 500
 		else:
-			print(colorama.ansi.clear_screen())
-			_= os.system('clear')
+			print(colorama.ansi.clear_screen(),end='')
+			os.system('clear')
 			return_object = s_input.lower()
 
 	if case == 'yes_no':
@@ -580,7 +584,7 @@ def getInput(case):
 		else:
 			return_object = s_input.lower()
 
-	print('\033[0m')
+	print('\033[0m', end='')
 	return return_object
 
 # END: Functions ............................................................. #
