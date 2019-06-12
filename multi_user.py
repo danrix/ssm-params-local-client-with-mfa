@@ -144,11 +144,9 @@ def mainLoop(credentials):
 			# 	pass
 
 			# Normalize query path
-			# path_norm = normalizePath("/"+conf.local['ssm_aws_profile'])
 			path_norm = normalizePath(credentials['list_path'],credentials['list_path'])
 
 			list_ret = getHierarchy(credentials,path_norm)
-
 			if list_ret == 500:
 				printResults('generic_error')
 				continue
@@ -326,14 +324,43 @@ def findSecret(credentials,s_in):
 		return 500
 	else:
 		if response['Parameters']:
+			# Prepare a list to hold results if more than one run is needed
+			whole_response = {}
 
 			if 'list_path' in credentials:
 				for x in range(len(response['Parameters'])):
+					# Trim base path from parameter name for better results display
 					response['Parameters'][x]['Name'] =  response['Parameters'][x]['Name'].replace(credentials['list_path'],'')
+			# Add these corrected parameters to hold list
+			whole_response['Parameters'] = response['Parameters']
 
+			# Check if more than one run is needed
+			if 'NextToken' in response:
+				while 'NextToken' in response:
+					# Try a next run
+					try:
+						response = client.get_parameters_by_path(
+							Path=s_in,
+							Recursive=True,
+							WithDecryption=True,
+							NextToken=response['NextToken']
+						)
+					except Exception as e:
+						return 500
+					else:
+						# Correct parameters and add to hold list
+						if response['Parameters']:
+							if 'list_path' in credentials:
+								for x in range(len(response['Parameters'])):
+									# Trim base path from parameter name for better results display
+									response['Parameters'][x]['Name'] =  response['Parameters'][x]['Name'].replace(credentials['list_path'],'')
+
+							whole_response['Parameters'].extend(response['Parameters'])
+					
 			return_object = {}
 			return_object['list'] = True
-			return_object['Parameters'] = response['Parameters']
+			# Return holding list
+			return_object['Parameters'] = whole_response['Parameters']
 			return return_object
 
 	# 2. Assume secret name is included in path
@@ -393,7 +420,37 @@ def getHierarchy(credentials,s_path):
 	except Exception as e:
 		return 500
 	else:
-		return response
+		# return response
+
+		if response['Parameters']:
+			# Prepare a list to hold results if more than one run is needed
+			whole_response = {}
+
+			# Add these parameters to hold list
+			whole_response['Parameters'] = response['Parameters']
+
+			# # Check if more than one run is needed
+			if 'NextToken' in response:
+				while 'NextToken' in response:
+					# Try a next run
+					try:
+						response = client.get_parameters_by_path(
+							Path=s_path,
+							Recursive=True,
+							WithDecryption=False,
+							NextToken=response['NextToken']
+						)
+					except Exception as e:
+						return 500
+					else:
+						# Add parameters to hold list
+						if response['Parameters']:
+							whole_response['Parameters'].extend(response['Parameters'])
+					
+			return_object = {}
+			# Return holding list
+			return_object['Parameters'] = whole_response['Parameters']
+			return return_object		
 
 def checkSession(credentials_expiration):
 	# Check that the secure session has not expired
